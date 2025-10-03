@@ -50,7 +50,7 @@ Inventory files (`inventory.ini`) contain IP addresses and credentials and are g
 
 **Debian example**:
 ```ini
-[proxmox]
+[debian]
 10.0.0.50 ansible_user=your_user ansible_become=yes
 ```
 
