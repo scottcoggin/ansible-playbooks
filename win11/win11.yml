@@ -1,0 +1,65 @@
+---
+- name: Windows 11 - fully patch via Windows Update
+  hosts: windows
+  gather_facts: false
+
+  vars:
+    update_categories:
+      - SecurityUpdates
+      - CriticalUpdates
+      - UpdateRollups
+      - DefinitionUpdates
+      - Updates
+
+  tasks:
+    # --- Prep PowerShellGet / PSGallery so PSWindowsUpdate installs cleanly ---
+
+    - name: Force TLS 1.2 for PowerShell web requests
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319
+        name: SchUseStrongCrypto
+        data: 1
+        type: dword
+
+    - name: Ensure NuGet package provider is installed
+      ansible.windows.win_shell: >
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers
+      args:
+        executable: PowerShell
+      changed_when: false  # idempotent enough for our purposes
+
+    - name: Trust PSGallery repository (AllUsers)
+      ansible.windows.win_shell: >
+        Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted
+      args:
+        executable: PowerShell
+      changed_when: false
+
+    - name: Ensure PSWindowsUpdate module is installed (from PSGallery)
+      community.windows.win_psmodule:
+        name: PSWindowsUpdate
+        state: present
+        repository: PSGallery
+        scope: AllUsers
+        trust_repository: true
+        skip_publisher_check: true
+
+    # --- Run updates repeatedly until no more updates and no reboot needed ---
+
+    - name: Install available Windows updates (reboot as needed)
+      ansible.windows.win_updates:
+        category_names: "{{ update_categories }}"
+        state: installed
+        reboot: yes
+        reboot_timeout: 3600
+      register: wu_result
+      # Loop until fully patched: no reboot required AND no updates remaining
+      until: (not wu_result.reboot_required | default(false)) and
+             ((wu_result.updates | default([])) | length == 0)
+      retries: 6
+      delay: 30
+
+    - name: Show final update summary
+      ansible.builtin.debug:
+        var: wu_result
+
